@@ -1,0 +1,87 @@
+package web
+
+import (
+	"context"
+
+	"[[.ModuleName]]/pkg/logger"
+)
+
+type contextKey string
+
+const (
+	LoggerCtxKey    contextKey = "logger"
+	RequestIDCtxKey contextKey = "request_id"
+	UserIDCtxKey    contextKey = "user_id"
+	SessionIDCtxKey contextKey = "session_id"
+
+	defaultFallbackServiceName = "default"
+	defaultFallbackEnvironment = "development"
+)
+
+func GetLogger(ctx context.Context) *logger.Logger {
+	if log, ok := ctx.Value(LoggerCtxKey).(*logger.Logger); ok {
+		return log
+	}
+	return logger.New(&logger.Config{
+		Level:       logger.LevelInfo,
+		Format:      logger.FormatJSON,
+		ServiceName: defaultFallbackServiceName,
+		Environment: defaultFallbackEnvironment,
+	})
+}
+
+func SetLogger(ctx context.Context, log *logger.Logger) context.Context {
+	return context.WithValue(ctx, LoggerCtxKey, log)
+}
+
+func GetRequestID(ctx context.Context) string {
+	if id, ok := ctx.Value(RequestIDCtxKey).(string); ok {
+		return id
+	}
+	return ""
+}
+
+func SetRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, RequestIDCtxKey, id)
+}
+
+func SetUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, UserIDCtxKey, userID)
+}
+
+func GetUserID(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(UserIDCtxKey).(string)
+	return id, ok && id != ""
+}
+
+const (
+	UserEmailCtxKey contextKey = "user_email"
+	UserRoleCtxKey  contextKey = "user_role"
+)
+
+func SetSessionID(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, SessionIDCtxKey, sessionID)
+}
+
+func SessionID(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(SessionIDCtxKey).(string)
+	return id, ok && id != ""
+}
+
+func SetUserEmail(ctx context.Context, email string) context.Context {
+	return context.WithValue(ctx, UserEmailCtxKey, email)
+}
+
+func GetUserEmail(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(UserEmailCtxKey).(string)
+	return v, ok && v != ""
+}
+
+func SetUserRole(ctx context.Context, role string) context.Context {
+	return context.WithValue(ctx, UserRoleCtxKey, role)
+}
+
+func GetUserRole(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(UserRoleCtxKey).(string)
+	return v, ok && v != ""
+}

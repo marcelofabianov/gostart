@@ -1,0 +1,63 @@
+name: [[.ProjectName]]
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    environment:
+      - APP_GENERAL_ENV=development
+      - APP_GENERAL_SERVICE_NAME=[[.ServiceName]]
+      - APP_DB_HOST=postgres
+      - APP_DB_PORT=5432
+      - APP_DB_USER=${APP_DB_USER:-[[.ServiceName]]}
+      - APP_DB_PASSWORD=${APP_DB_PASSWORD:-secret}
+      - APP_DB_NAME=${APP_DB_NAME:-[[.ServiceName]]}
+      - APP_REDIS_HOST=redis
+      - APP_REDIS_PORT=6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./certs:/app/certs:ro
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${APP_DB_USER:-[[.ServiceName]]}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD:-secret}
+      POSTGRES_DB: ${APP_DB_NAME:-[[.ServiceName]]}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${APP_DB_USER:-[[.ServiceName]]}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

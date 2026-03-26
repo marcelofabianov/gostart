@@ -1,0 +1,27 @@
+package main
+
+// @title           [[.ServiceName]] API
+// @version         1.0
+// @description     API [[.ServiceName]]
+// @BasePath        /api/v1
+// @securityDefinitions.apikey Bearer
+// @in header
+// @name Authorization
+
+import (
+	_ "[[.ModuleName]]/docs"
+
+	"go.uber.org/fx"
+
+	"[[.ModuleName]]/internal/di"
+	"[[.ModuleName]]/pkg/web"
+)
+
+func main() {
+	fx.New(
+		di.PkgModule,
+		di.AppModule,
+		di.HelloModule,
+		fx.Invoke(func(*web.Server) {}),
+	).Run()
+}

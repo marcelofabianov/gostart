@@ -1,0 +1,561 @@
+package config
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"[[.ModuleName]]/pkg/retry"
+	"github.com/spf13/viper"
+)
+
+type Config struct {
+	General    GeneralConfig
+	Logger     LoggerConfig
+	HTTP       HTTPConfig
+	Database   DatabaseConfig
+	Redis      RedisConfig
+	Migrations MigrationsConfig
+	JWT        JWTConfig
+	Auth       AuthConfig
+}
+
+type GeneralConfig struct {
+	Env         string
+	TZ          string
+	ServiceName string
+}
+
+type LoggerConfig struct {
+	Level string
+}
+
+type HTTPConfig struct {
+	Host            string
+	Port            int
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	IdleTimeout     time.Duration
+	ShutdownTimeout time.Duration
+	RequestTimeout  time.Duration
+	MaxBodySize     int64
+	SecurityHeaders SecurityHeadersConfig
+	CORS            CORSConfig
+	Compression     CompressionConfig
+	RateLimit       RateLimitConfig
+	CSRF            CSRFConfig
+	TLS             TLSConfig
+}
+
+type SecurityHeadersConfig struct {
+	XContentTypeOptions     string
+	XFrameOptions           string
+	ContentSecurityPolicy   string
+	ReferrerPolicy          string
+	StrictTransportSecurity string
+	CacheControl            string
+	PermissionsPolicy       string
+	XDNSPrefetchControl     string
+	XDownloadOptions        string
+}
+
+type CORSConfig struct {
+	Enabled          bool
+	AllowedOrigins   []string
+	AllowedMethods   []string
+	AllowedHeaders   []string
+	ExposedHeaders   []string
+	AllowCredentials bool
+	MaxAge           int
+}
+
+type CompressionConfig struct {
+	Enabled bool
+	Level   int
+}
+
+type RateLimitConfig struct {
+	Enabled        bool
+	Global         RateConfig
+	Routes         map[string]RateConfig
+	TrustedProxies []string
+}
+
+type RateConfig struct {
+	Limit  int
+	Window time.Duration
+	Burst  int
+}
+
+type CSRFConfig struct {
+	Enabled    bool
+	Secret     string
+	CookieName string
+	HeaderName string
+	TTL        time.Duration
+	Exempt     []string
+}
+
+type TLSConfig struct {
+	Enabled     bool
+	CertFile    string
+	KeyFile     string
+	HTTPSOnly   bool
+	RedirectURL string
+}
+
+type DatabaseConfig struct {
+	Connect     DatabaseConnectConfig
+	Pool        DatabasePoolConfig
+	Credentials DatabaseCredentialsConfig
+}
+
+type DatabaseConnectConfig struct {
+	QueryTimeout   time.Duration
+	ExecTimeout    time.Duration
+	BackoffMin     time.Duration
+	BackoffMax     time.Duration
+	BackoffFactor  int
+	BackoffJitter  bool
+	BackoffRetries int
+}
+
+type DatabasePoolConfig struct {
+	MaxOpenConns      int
+	MaxIdleConns      int
+	ConnMaxLifetime   time.Duration
+	ConnMaxIdleTime   time.Duration
+	HealthCheckPeriod time.Duration
+}
+
+type DatabaseCredentialsConfig struct {
+	Host     string
+	Port     int
+	Name     string
+	User     string
+	Password string
+	SSLMode  string
+}
+
+type RedisConfig struct {
+	Connect     RedisConnectConfig
+	Pool        RedisPoolConfig
+	Credentials RedisCredentialsConfig
+}
+
+type RedisConnectConfig struct {
+	QueryTimeout   time.Duration
+	ExecTimeout    time.Duration
+	BackoffMin     time.Duration
+	BackoffMax     time.Duration
+	BackoffFactor  int
+	BackoffJitter  bool
+	BackoffRetries int
+}
+
+type RedisPoolConfig struct {
+	MaxIdleConns   int
+	MaxActiveConns int
+}
+
+type RedisCredentialsConfig struct {
+	Host     string
+	Port     int
+	Password string
+	DB       int
+}
+
+type MigrationsConfig struct {
+	Dir string
+}
+
+type JWTConfig struct {
+	AccessSecret    string
+	RefreshSecret   string
+	AccessTokenTTL  time.Duration
+	RefreshTokenTTL time.Duration
+	Issuer          string
+}
+
+type AuthConfig struct {
+	MaxLoginAttempts int
+	LockoutDuration  time.Duration
+}
+
+// Load reads configuration from environment variables using Viper.
+func Load() (*Config, error) {
+	v := viper.New()
+
+	v.SetConfigFile(".env")
+	v.SetConfigType("env")
+
+	if err := v.ReadInConfig(); err != nil {
+		// .env not found; rely on env vars and defaults
+		_ = err
+	}
+
+	v.AutomaticEnv()
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	setDefaults(v)
+
+	cfg := &Config{
+		General: GeneralConfig{
+			Env:         v.GetString("APP_GENERAL_ENV"),
+			TZ:          v.GetString("APP_GENERAL_TZ"),
+			ServiceName: v.GetString("APP_GENERAL_SERVICE_NAME"),
+		},
+		Logger: LoggerConfig{
+			Level: v.GetString("APP_LOGGER_LEVEL"),
+		},
+		HTTP: HTTPConfig{
+			Host:            v.GetString("APP_HTTP_HOST"),
+			Port:            v.GetInt("APP_HTTP_PORT"),
+			ReadTimeout:     v.GetDuration("APP_HTTP_READ_TIMEOUT"),
+			WriteTimeout:    v.GetDuration("APP_HTTP_WRITE_TIMEOUT"),
+			IdleTimeout:     v.GetDuration("APP_HTTP_IDLE_TIMEOUT"),
+			ShutdownTimeout: v.GetDuration("APP_HTTP_SHUTDOWN_TIMEOUT"),
+			RequestTimeout:  v.GetDuration("APP_HTTP_REQUEST_TIMEOUT"),
+			MaxBodySize:     v.GetInt64("APP_HTTP_MAX_BODY_SIZE"),
+			SecurityHeaders: SecurityHeadersConfig{
+				XContentTypeOptions:     v.GetString("APP_HTTP_SECURITY_X_CONTENT_TYPE_OPTIONS"),
+				XFrameOptions:           v.GetString("APP_HTTP_SECURITY_X_FRAME_OPTIONS"),
+				ContentSecurityPolicy:   v.GetString("APP_HTTP_SECURITY_CONTENT_SECURITY_POLICY"),
+				ReferrerPolicy:          v.GetString("APP_HTTP_SECURITY_REFERRER_POLICY"),
+				StrictTransportSecurity: v.GetString("APP_HTTP_SECURITY_STRICT_TRANSPORT_SECURITY"),
+				CacheControl:            v.GetString("APP_HTTP_SECURITY_CACHE_CONTROL"),
+				PermissionsPolicy:       v.GetString("APP_HTTP_SECURITY_PERMISSIONS_POLICY"),
+				XDNSPrefetchControl:     v.GetString("APP_HTTP_SECURITY_X_DNS_PREFETCH_CONTROL"),
+				XDownloadOptions:        v.GetString("APP_HTTP_SECURITY_X_DOWNLOAD_OPTIONS"),
+			},
+			CORS: CORSConfig{
+				Enabled:          v.GetBool("APP_HTTP_CORS_ENABLED"),
+				AllowedOrigins:   parseCommaSeparated(v.GetString("APP_HTTP_CORS_ALLOWED_ORIGINS")),
+				AllowedMethods:   parseCommaSeparated(v.GetString("APP_HTTP_CORS_ALLOWED_METHODS")),
+				AllowedHeaders:   parseCommaSeparated(v.GetString("APP_HTTP_CORS_ALLOWED_HEADERS")),
+				ExposedHeaders:   parseCommaSeparated(v.GetString("APP_HTTP_CORS_EXPOSED_HEADERS")),
+				AllowCredentials: v.GetBool("APP_HTTP_CORS_ALLOW_CREDENTIALS"),
+				MaxAge:           v.GetInt("APP_HTTP_CORS_MAX_AGE"),
+			},
+			Compression: CompressionConfig{
+				Enabled: v.GetBool("APP_HTTP_COMPRESSION_ENABLED"),
+				Level:   v.GetInt("APP_HTTP_COMPRESSION_LEVEL"),
+			},
+			RateLimit: RateLimitConfig{
+				Enabled: v.GetBool("APP_HTTP_RATE_LIMIT_ENABLED"),
+				Global: RateConfig{
+					Limit:  v.GetInt("APP_HTTP_RATE_LIMIT_GLOBAL_LIMIT"),
+					Window: v.GetDuration("APP_HTTP_RATE_LIMIT_GLOBAL_WINDOW"),
+					Burst:  v.GetInt("APP_HTTP_RATE_LIMIT_GLOBAL_BURST"),
+				},
+				TrustedProxies: parseCommaSeparated(v.GetString("APP_HTTP_RATE_LIMIT_TRUSTED_PROXIES")),
+			},
+			CSRF: CSRFConfig{
+				Enabled:    v.GetBool("APP_HTTP_CSRF_ENABLED"),
+				Secret:     v.GetString("APP_HTTP_CSRF_SECRET"),
+				CookieName: v.GetString("APP_HTTP_CSRF_COOKIE_NAME"),
+				HeaderName: v.GetString("APP_HTTP_CSRF_HEADER_NAME"),
+				TTL:        v.GetDuration("APP_HTTP_CSRF_TTL"),
+				Exempt:     parseCommaSeparated(v.GetString("APP_HTTP_CSRF_EXEMPT")),
+			},
+			TLS: TLSConfig{
+				Enabled:     v.GetBool("APP_HTTP_TLS_ENABLED"),
+				CertFile:    v.GetString("APP_HTTP_TLS_CERT_FILE"),
+				KeyFile:     v.GetString("APP_HTTP_TLS_KEY_FILE"),
+				HTTPSOnly:   v.GetBool("APP_HTTP_TLS_HTTPS_ONLY"),
+				RedirectURL: v.GetString("APP_HTTP_TLS_REDIRECT_URL"),
+			},
+		},
+		Database: DatabaseConfig{
+			Connect: DatabaseConnectConfig{
+				QueryTimeout:   v.GetDuration("APP_DB_CONNECT_QUERY_TIMEOUT"),
+				ExecTimeout:    v.GetDuration("APP_DB_CONNECT_EXEC_TIMEOUT"),
+				BackoffMin:     v.GetDuration("APP_DB_CONNECT_BACKOFF_MIN"),
+				BackoffMax:     v.GetDuration("APP_DB_CONNECT_BACKOFF_MAX"),
+				BackoffFactor:  v.GetInt("APP_DB_CONNECT_BACKOFF_FACTOR"),
+				BackoffJitter:  v.GetBool("APP_DB_CONNECT_BACKOFF_JITTER"),
+				BackoffRetries: v.GetInt("APP_DB_CONNECT_BACKOFF_RETRIES"),
+			},
+			Pool: DatabasePoolConfig{
+				MaxOpenConns:      v.GetInt("APP_DB_POOL_MAX_OPEN_CONNS"),
+				MaxIdleConns:      v.GetInt("APP_DB_POOL_MAX_IDLE_CONNS"),
+				ConnMaxLifetime:   v.GetDuration("APP_DB_POOL_CONN_MAX_LIFETIME"),
+				ConnMaxIdleTime:   v.GetDuration("APP_DB_POOL_CONN_MAX_IDLE_TIME"),
+				HealthCheckPeriod: v.GetDuration("APP_DB_POOL_HEALTH_CHECK_PERIOD"),
+			},
+			Credentials: DatabaseCredentialsConfig{
+				Host:     v.GetString("APP_DB_HOST"),
+				Port:     v.GetInt("APP_DB_PORT"),
+				Name:     v.GetString("APP_DB_NAME"),
+				User:     v.GetString("APP_DB_USER"),
+				Password: v.GetString("APP_DB_PASSWORD"),
+				SSLMode:  v.GetString("APP_DB_SSLMODE"),
+			},
+		},
+		Redis: RedisConfig{
+			Connect: RedisConnectConfig{
+				QueryTimeout:   v.GetDuration("APP_REDIS_CONNECT_QUERY_TIMEOUT"),
+				ExecTimeout:    v.GetDuration("APP_REDIS_CONNECT_EXEC_TIMEOUT"),
+				BackoffMin:     v.GetDuration("APP_REDIS_CONNECT_BACKOFF_MIN"),
+				BackoffMax:     v.GetDuration("APP_REDIS_CONNECT_BACKOFF_MAX"),
+				BackoffFactor:  v.GetInt("APP_REDIS_CONNECT_BACKOFF_FACTOR"),
+				BackoffJitter:  v.GetBool("APP_REDIS_CONNECT_BACKOFF_JITTER"),
+				BackoffRetries: v.GetInt("APP_REDIS_CONNECT_BACKOFF_RETRIES"),
+			},
+			Pool: RedisPoolConfig{
+				MaxIdleConns:   v.GetInt("APP_REDIS_POOL_MAX_IDLE_CONNS"),
+				MaxActiveConns: v.GetInt("APP_REDIS_POOL_MAX_ACTIVE_CONNS"),
+			},
+			Credentials: RedisCredentialsConfig{
+				Host:     v.GetString("APP_REDIS_HOST"),
+				Port:     v.GetInt("APP_REDIS_PORT"),
+				Password: v.GetString("APP_REDIS_PASSWORD"),
+				DB:       v.GetInt("APP_REDIS_DB"),
+			},
+		},
+		Migrations: MigrationsConfig{
+			Dir: v.GetString("APP_MIGRATIONS_DIR"),
+		},
+		JWT: JWTConfig{
+			AccessSecret:    v.GetString("APP_JWT_ACCESS_SECRET"),
+			RefreshSecret:   v.GetString("APP_JWT_REFRESH_SECRET"),
+			AccessTokenTTL:  v.GetDuration("APP_JWT_ACCESS_TOKEN_TTL"),
+			RefreshTokenTTL: v.GetDuration("APP_JWT_REFRESH_TOKEN_TTL"),
+			Issuer:          v.GetString("APP_JWT_ISSUER"),
+		},
+		Auth: AuthConfig{
+			MaxLoginAttempts: v.GetInt("APP_AUTH_MAX_LOGIN_ATTEMPTS"),
+			LockoutDuration:  v.GetDuration("APP_AUTH_LOCKOUT_DURATION"),
+		},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("configuração inválida: %w", err)
+	}
+
+	return cfg, nil
+}
+
+func setDefaults(v *viper.Viper) {
+	v.SetDefault("APP_GENERAL_ENV", "development")
+	v.SetDefault("APP_GENERAL_TZ", "UTC")
+	v.SetDefault("APP_GENERAL_SERVICE_NAME", "[[.ServiceName]]")
+
+	v.SetDefault("APP_LOGGER_LEVEL", "info")
+
+	v.SetDefault("APP_HTTP_HOST", "0.0.0.0")
+	v.SetDefault("APP_HTTP_PORT", 8080)
+	v.SetDefault("APP_HTTP_READ_TIMEOUT", "15s")
+	v.SetDefault("APP_HTTP_WRITE_TIMEOUT", "15s")
+	v.SetDefault("APP_HTTP_IDLE_TIMEOUT", "60s")
+	v.SetDefault("APP_HTTP_SHUTDOWN_TIMEOUT", "30s")
+	v.SetDefault("APP_HTTP_REQUEST_TIMEOUT", "30s")
+	v.SetDefault("APP_HTTP_MAX_BODY_SIZE", 1048576)
+
+	v.SetDefault("APP_HTTP_SECURITY_X_CONTENT_TYPE_OPTIONS", "nosniff")
+	v.SetDefault("APP_HTTP_SECURITY_X_FRAME_OPTIONS", "DENY")
+	v.SetDefault("APP_HTTP_SECURITY_REFERRER_POLICY", "strict-origin-when-cross-origin")
+	v.SetDefault("APP_HTTP_SECURITY_CONTENT_SECURITY_POLICY", "")
+	v.SetDefault("APP_HTTP_SECURITY_STRICT_TRANSPORT_SECURITY", "")
+	v.SetDefault("APP_HTTP_SECURITY_CACHE_CONTROL", "")
+	v.SetDefault("APP_HTTP_SECURITY_PERMISSIONS_POLICY", "")
+	v.SetDefault("APP_HTTP_SECURITY_X_DNS_PREFETCH_CONTROL", "")
+	v.SetDefault("APP_HTTP_SECURITY_X_DOWNLOAD_OPTIONS", "")
+
+	v.SetDefault("APP_HTTP_CORS_ENABLED", false)
+	v.SetDefault("APP_HTTP_CORS_ALLOWED_ORIGINS", "")
+	v.SetDefault("APP_HTTP_CORS_ALLOWED_METHODS", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+	v.SetDefault("APP_HTTP_CORS_ALLOWED_HEADERS", "Authorization,Content-Type,X-Request-ID")
+	v.SetDefault("APP_HTTP_CORS_MAX_AGE", 300)
+
+	v.SetDefault("APP_HTTP_RATE_LIMIT_ENABLED", false)
+	v.SetDefault("APP_HTTP_RATE_LIMIT_GLOBAL_LIMIT", 100)
+	v.SetDefault("APP_HTTP_RATE_LIMIT_GLOBAL_WINDOW", "1m")
+	v.SetDefault("APP_HTTP_RATE_LIMIT_GLOBAL_BURST", 20)
+
+	v.SetDefault("APP_HTTP_CSRF_ENABLED", false)
+	v.SetDefault("APP_HTTP_CSRF_COOKIE_NAME", "csrf_token")
+	v.SetDefault("APP_HTTP_CSRF_HEADER_NAME", "X-CSRF-Token")
+	v.SetDefault("APP_HTTP_CSRF_TTL", "1h")
+
+	v.SetDefault("APP_HTTP_COMPRESSION_ENABLED", true)
+	v.SetDefault("APP_HTTP_COMPRESSION_LEVEL", 5)
+
+	v.SetDefault("APP_HTTP_TLS_ENABLED", false)
+	v.SetDefault("APP_HTTP_TLS_CERT_FILE", "certs/server.crt")
+	v.SetDefault("APP_HTTP_TLS_KEY_FILE", "certs/server.key")
+	v.SetDefault("APP_HTTP_TLS_HTTPS_ONLY", false)
+
+	v.SetDefault("APP_DB_CONNECT_QUERY_TIMEOUT", "5s")
+	v.SetDefault("APP_DB_CONNECT_EXEC_TIMEOUT", "10s")
+	v.SetDefault("APP_DB_CONNECT_BACKOFF_MIN", "500ms")
+	v.SetDefault("APP_DB_CONNECT_BACKOFF_MAX", "30s")
+	v.SetDefault("APP_DB_CONNECT_BACKOFF_FACTOR", 2)
+	v.SetDefault("APP_DB_CONNECT_BACKOFF_JITTER", true)
+	v.SetDefault("APP_DB_CONNECT_BACKOFF_RETRIES", 5)
+
+	v.SetDefault("APP_DB_POOL_MAX_OPEN_CONNS", 25)
+	v.SetDefault("APP_DB_POOL_MAX_IDLE_CONNS", 5)
+	v.SetDefault("APP_DB_POOL_CONN_MAX_LIFETIME", "15m")
+	v.SetDefault("APP_DB_POOL_CONN_MAX_IDLE_TIME", "5m")
+	v.SetDefault("APP_DB_POOL_HEALTH_CHECK_PERIOD", "1m")
+
+	v.SetDefault("APP_DB_HOST", "localhost")
+	v.SetDefault("APP_DB_PORT", 5432)
+	v.SetDefault("APP_DB_NAME", "[[.ServiceName]]")
+	v.SetDefault("APP_DB_USER", "[[.ServiceName]]")
+	v.SetDefault("APP_DB_PASSWORD", "")
+	v.SetDefault("APP_DB_SSLMODE", "disable")
+
+	v.SetDefault("APP_REDIS_CONNECT_QUERY_TIMEOUT", "2s")
+	v.SetDefault("APP_REDIS_CONNECT_EXEC_TIMEOUT", "2s")
+	v.SetDefault("APP_REDIS_CONNECT_BACKOFF_MIN", "200ms")
+	v.SetDefault("APP_REDIS_CONNECT_BACKOFF_MAX", "15s")
+	v.SetDefault("APP_REDIS_CONNECT_BACKOFF_FACTOR", 2)
+	v.SetDefault("APP_REDIS_CONNECT_BACKOFF_JITTER", true)
+	v.SetDefault("APP_REDIS_CONNECT_BACKOFF_RETRIES", 5)
+
+	v.SetDefault("APP_REDIS_POOL_MAX_IDLE_CONNS", 10)
+	v.SetDefault("APP_REDIS_POOL_MAX_ACTIVE_CONNS", 20)
+
+	v.SetDefault("APP_REDIS_HOST", "localhost")
+	v.SetDefault("APP_REDIS_PORT", 6379)
+	v.SetDefault("APP_REDIS_PASSWORD", "")
+	v.SetDefault("APP_REDIS_DB", 0)
+
+	v.SetDefault("APP_MIGRATIONS_DIR", "db/migrations")
+
+	v.SetDefault("APP_JWT_ACCESS_TOKEN_TTL", "15m")
+	v.SetDefault("APP_JWT_REFRESH_TOKEN_TTL", "168h")
+	v.SetDefault("APP_JWT_ISSUER", "[[.ServiceName]]")
+
+	v.SetDefault("APP_AUTH_MAX_LOGIN_ATTEMPTS", 5)
+	v.SetDefault("APP_AUTH_LOCKOUT_DURATION", "15m")
+}
+
+// Validate checks if the loaded configuration is valid.
+func (c *Config) Validate() error {
+	validEnvs := map[string]bool{
+		"development": true,
+		"staging":     true,
+		"production":  true,
+		"test":        true,
+	}
+	if !validEnvs[c.General.Env] {
+		return fmt.Errorf("ambiente inválido: %s", c.General.Env)
+	}
+
+	validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+	if !validLevels[strings.ToLower(c.Logger.Level)] {
+		return fmt.Errorf("nível de log inválido: %s", c.Logger.Level)
+	}
+
+	if c.HTTP.Port < 1 || c.HTTP.Port > 65535 {
+		return fmt.Errorf("porta HTTP inválida: %d", c.HTTP.Port)
+	}
+
+	if c.HTTP.TLS.Enabled {
+		if c.HTTP.TLS.CertFile == "" {
+			return fmt.Errorf("cert file é obrigatório quando TLS está habilitado")
+		}
+		if c.HTTP.TLS.KeyFile == "" {
+			return fmt.Errorf("key file é obrigatório quando TLS está habilitado")
+		}
+	}
+
+	if c.Database.Credentials.Host == "" {
+		return fmt.Errorf("host do banco de dados é obrigatório")
+	}
+	if c.Database.Credentials.Name == "" {
+		return fmt.Errorf("nome do banco de dados é obrigatório")
+	}
+	if c.Database.Credentials.User == "" {
+		return fmt.Errorf("usuário do banco de dados é obrigatório")
+	}
+	if c.Database.Pool.MaxOpenConns < 1 {
+		return fmt.Errorf("max open connections deve ser pelo menos 1")
+	}
+
+	if c.Redis.Credentials.Host == "" {
+		return fmt.Errorf("host do Redis é obrigatório")
+	}
+	if c.Redis.Credentials.Port < 1 || c.Redis.Credentials.Port > 65535 {
+		return fmt.Errorf("porta do Redis inválida: %d", c.Redis.Credentials.Port)
+	}
+
+	if c.JWT.AccessTokenTTL <= 0 {
+		return fmt.Errorf("JWT access token TTL deve ser positivo")
+	}
+	if c.JWT.RefreshTokenTTL <= 0 {
+		return fmt.Errorf("JWT refresh token TTL deve ser positivo")
+	}
+	if c.JWT.Issuer == "" {
+		return fmt.Errorf("JWT issuer é obrigatório")
+	}
+
+	return nil
+}
+
+// GetDatabaseDSN returns the PostgreSQL connection string.
+func (c *Config) GetDatabaseDSN() string {
+	return fmt.Sprintf(
+		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
+		c.Database.Credentials.Host,
+		c.Database.Credentials.Port,
+		c.Database.Credentials.Name,
+		c.Database.Credentials.User,
+		c.Database.Credentials.Password,
+		c.Database.Credentials.SSLMode,
+	)
+}
+
+// GetRedisAddr returns the Redis address as host:port.
+func (c *Config) GetRedisAddr() string {
+	return fmt.Sprintf("%s:%d", c.Redis.Credentials.Host, c.Redis.Credentials.Port)
+}
+
+// IsDevelopment returns true if the environment is development.
+func (c *Config) IsDevelopment() bool {
+	return c.General.Env == "development"
+}
+
+// IsProduction returns true if the environment is production.
+func (c *Config) IsProduction() bool {
+	return c.General.Env == "production"
+}
+
+// GetRedisRetryConfig returns retry configuration for Redis operations.
+func (c *Config) GetRedisRetryConfig() *retry.Config {
+	return &retry.Config{
+		MaxRetries: c.Redis.Connect.BackoffRetries,
+		MinBackoff: c.Redis.Connect.BackoffMin,
+		MaxBackoff: c.Redis.Connect.BackoffMax,
+		Factor:     float64(c.Redis.Connect.BackoffFactor),
+		Jitter:     c.Redis.Connect.BackoffJitter,
+	}
+}
+
+// GetDatabaseRetryConfig returns retry configuration for database operations.
+func (c *Config) GetDatabaseRetryConfig() *retry.Config {
+	return &retry.Config{
+		MaxRetries: c.Database.Connect.BackoffRetries,
+		MinBackoff: c.Database.Connect.BackoffMin,
+		MaxBackoff: c.Database.Connect.BackoffMax,
+		Factor:     float64(c.Database.Connect.BackoffFactor),
+		Jitter:     c.Database.Connect.BackoffJitter,
+	}
+}
+
+func parseCommaSeparated(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}

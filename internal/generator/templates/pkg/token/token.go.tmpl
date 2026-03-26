@@ -1,0 +1,83 @@
+package token
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+
+	"[[.ModuleName]]/config"
+)
+
+type Claims struct {
+	jwt.RegisteredClaims
+	UserID    string    `json:"user_id"`
+	SessionID string    `json:"session_id"`
+	Email     string    `json:"email"`
+	Role      string    `json:"role"`
+	ExpiresAt time.Time `json:"expires_at_parsed,omitempty"`
+}
+
+type Service struct {
+	cfg *config.Config
+}
+
+func NewService(cfg *config.Config) *Service {
+	return &Service{cfg: cfg}
+}
+
+func (s *Service) Generate(ctx context.Context, userID, sessionID, email, role string) (string, error) {
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"jti":        uuid.NewString(),
+		"sub":        userID,
+		"session_id": sessionID,
+		"email":      email,
+		"role":       role,
+		"iat":        now.Unix(),
+		"exp":        now.Add(s.cfg.JWT.AccessTokenTTL).Unix(),
+		"iss":        s.cfg.JWT.Issuer,
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return tok.SignedString([]byte(s.cfg.JWT.AccessSecret))
+}
+
+func (s *Service) GenerateRefresh(ctx context.Context, userID, sessionID string) (string, error) {
+	now := time.Now()
+	claims := jwt.MapClaims{
+		"jti":        uuid.NewString(),
+		"sub":        userID,
+		"session_id": sessionID,
+		"iat":        now.Unix(),
+		"exp":        now.Add(s.cfg.JWT.RefreshTokenTTL).Unix(),
+		"iss":        s.cfg.JWT.Issuer,
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return tok.SignedString([]byte(s.cfg.JWT.RefreshSecret))
+}
+
+func (s *Service) Parse(ctx context.Context, tokenStr string) (*Claims, error) {
+	tok, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("método de assinatura inesperado: %v", t.Header["alg"])
+		}
+		return []byte(s.cfg.JWT.AccessSecret), nil
+	})
+	if err != nil || !tok.Valid {
+		return nil, fmt.Errorf("token inválido: %w", err)
+	}
+	mapClaims, ok := tok.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("claims inválidos")
+	}
+	exp, _ := mapClaims["exp"].(float64)
+	return &Claims{
+		UserID:    fmt.Sprintf("%v", mapClaims["sub"]),
+		SessionID: fmt.Sprintf("%v", mapClaims["session_id"]),
+		Email:     fmt.Sprintf("%v", mapClaims["email"]),
+		Role:      fmt.Sprintf("%v", mapClaims["role"]),
+		ExpiresAt: time.Unix(int64(exp), 0),
+	}, nil
+}

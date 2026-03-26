@@ -1,0 +1,348 @@
+// Package database provides a PostgreSQL connection wrapper using the pgx driver.
+package database
+
+import (
+	"context"
+	"database/sql"
+	"time"
+
+	"github.com/marcelofabianov/fault"
+
+	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver
+
+	"[[.ModuleName]]/config"
+	"[[.ModuleName]]/pkg/logger"
+	"[[.ModuleName]]/pkg/retry"
+)
+
+var (
+	ErrConnectionFailed = fault.New(
+		"database connection failed after retries",
+		fault.WithCode(fault.InfraError),
+	)
+
+	ErrInvalidConfig = fault.New(
+		"invalid database configuration",
+		fault.WithCode(fault.Invalid),
+	)
+
+	ErrAlreadyConnected = fault.New(
+		"banco de dados já conectado",
+		fault.WithCode(fault.Conflict),
+	)
+
+	ErrNotConnected = fault.New(
+		"banco de dados não conectado",
+		fault.WithCode(fault.NotFound),
+	)
+
+	ErrOpenFailed = fault.New(
+		"falha ao abrir conexão com o banco de dados",
+		fault.WithCode(fault.InfraError),
+	)
+
+	ErrPingFailed = fault.New(
+		"falha ao verificar conexão com o banco de dados",
+		fault.WithCode(fault.InfraError),
+	)
+
+	ErrCloseFailed = fault.New(
+		"falha ao encerrar conexão com o banco de dados",
+		fault.WithCode(fault.Internal),
+	)
+
+	ErrExecFailed = fault.New(
+		"falha ao executar comando no banco de dados",
+		fault.WithCode(fault.Internal),
+	)
+
+	ErrQueryFailed = fault.New(
+		"falha ao executar consulta no banco de dados",
+		fault.WithCode(fault.Internal),
+	)
+
+	ErrTransactionFailed = fault.New(
+		"falha ao iniciar transação no banco de dados",
+		fault.WithCode(fault.Internal),
+	)
+)
+
+const pgxDriverName = "pgx"
+
+type DB struct {
+	conn   *sql.DB
+	config *config.Config
+	logger *logger.Logger
+}
+
+func New(cfg *config.Config) (*DB, error) {
+	if cfg == nil {
+		return nil, ErrInvalidConfig
+	}
+
+	return &DB{
+		config: cfg,
+		logger: logger.New(&logger.Config{Level: logger.LevelInfo, Format: logger.FormatJSON}),
+	}, nil
+}
+
+func (db *DB) SetLogger(log *logger.Logger) {
+	if log != nil {
+		db.logger = log
+	}
+}
+
+func (db *DB) Connect(ctx context.Context) error {
+	if db.conn != nil {
+		return ErrAlreadyConnected
+	}
+
+	db.logger.Info("Conectando ao banco de dados",
+		"host", db.config.Database.Credentials.Host,
+		"database", db.config.Database.Credentials.Name,
+		"max_retries", db.config.Database.Connect.BackoffRetries,
+	)
+
+	retryConfig := db.config.GetDatabaseRetryConfig()
+	retryConfig.Logger = db.logger.Slog()
+
+	err := retry.Do(ctx, retryConfig, func(ctx context.Context) error {
+		return db.connect(ctx)
+	})
+	if err != nil {
+		db.logger.Error("Falha ao conectar ao banco de dados",
+			"host", db.config.Database.Credentials.Host,
+			"database", db.config.Database.Credentials.Name,
+			"error", err.Error(),
+		)
+		return fault.Wrap(err, "database connection error",
+			fault.WithContext("host", db.config.Database.Credentials.Host),
+		)
+	}
+
+	db.logger.Info("Banco de dados conectado com sucesso",
+		"host", db.config.Database.Credentials.Host,
+		"database", db.config.Database.Credentials.Name,
+		"pool_max_open", db.config.Database.Pool.MaxOpenConns,
+		"pool_max_idle", db.config.Database.Pool.MaxIdleConns,
+	)
+
+	return nil
+}
+
+func (db *DB) connect(ctx context.Context) error {
+	dsn := db.config.GetDatabaseDSN()
+
+	conn, err := sql.Open(pgxDriverName, dsn)
+	if err != nil {
+		return fault.Wrap(ErrOpenFailed, "sql.Open failed",
+			fault.WithWrappedErr(err),
+			fault.WithContext("driver", "pgx"),
+		)
+	}
+
+	db.configurePool(conn)
+
+	pingCtx, cancel := context.WithTimeout(ctx, db.config.Database.Connect.QueryTimeout)
+	defer cancel()
+
+	if err := conn.PingContext(pingCtx); err != nil {
+		_ = conn.Close()
+		return fault.Wrap(ErrPingFailed, "ping failed",
+			fault.WithWrappedErr(err),
+			fault.WithContext("timeout", db.config.Database.Connect.QueryTimeout.String()),
+		)
+	}
+
+	db.conn = conn
+	return nil
+}
+
+func (db *DB) configurePool(conn *sql.DB) {
+	poolConfig := db.config.Database.Pool
+
+	conn.SetMaxOpenConns(poolConfig.MaxOpenConns)
+	conn.SetMaxIdleConns(poolConfig.MaxIdleConns)
+	conn.SetConnMaxLifetime(poolConfig.ConnMaxLifetime)
+	conn.SetConnMaxIdleTime(poolConfig.ConnMaxIdleTime)
+}
+
+func (db *DB) Close() error {
+	if db.conn == nil {
+		return ErrNotConnected
+	}
+
+	db.logger.Info("Encerrando conexão com banco de dados")
+
+	if err := db.conn.Close(); err != nil {
+		return fault.Wrap(ErrCloseFailed, "close failed",
+			fault.WithWrappedErr(err),
+		)
+	}
+
+	db.conn = nil
+	return nil
+}
+
+func (db *DB) Ping(ctx context.Context) error {
+	if db.conn == nil {
+		return ErrNotConnected
+	}
+
+	pingCtx, cancel := context.WithTimeout(ctx, db.config.Database.Connect.QueryTimeout)
+	defer cancel()
+
+	if err := db.conn.PingContext(pingCtx); err != nil {
+		return fault.Wrap(ErrPingFailed, "ping failed",
+			fault.WithWrappedErr(err),
+			fault.WithContext("timeout", db.config.Database.Connect.QueryTimeout.String()),
+		)
+	}
+
+	return nil
+}
+
+func (db *DB) HealthCheck(ctx context.Context) error {
+	if db.conn == nil {
+		return ErrNotConnected
+	}
+
+	if err := db.Ping(ctx); err != nil {
+		return err
+	}
+
+	stats := db.conn.Stats()
+
+	if stats.InUse >= stats.MaxOpenConnections {
+		db.logger.Warn("Todas as conexões com banco de dados estão em uso",
+			"in_use", stats.InUse,
+			"max_open", stats.MaxOpenConnections,
+		)
+	}
+
+	if stats.WaitCount > 0 {
+		db.logger.Warn("Conexões com banco de dados aguardando",
+			"wait_count", stats.WaitCount,
+			"wait_duration", stats.WaitDuration,
+		)
+	}
+
+	return nil
+}
+
+func (db *DB) Stats() sql.DBStats {
+	if db.conn == nil {
+		return sql.DBStats{}
+	}
+	return db.conn.Stats()
+}
+
+func (db *DB) DB() *sql.DB {
+	return db.conn
+}
+
+func (db *DB) IsConnected() bool {
+	return db.conn != nil
+}
+
+func (db *DB) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	if db.conn == nil {
+		return nil, ErrNotConnected
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, db.config.Database.Connect.ExecTimeout)
+	defer cancel()
+
+	result, err := db.conn.ExecContext(execCtx, query, args...)
+	if err != nil {
+		db.logger.Error("Falha na execução da query",
+			"timeout", db.config.Database.Connect.ExecTimeout.String(),
+			"error", err.Error(),
+		)
+		return nil, fault.Wrap(ErrExecFailed, "exec failed",
+			fault.WithWrappedErr(err),
+			fault.WithContext("timeout", db.config.Database.Connect.ExecTimeout.String()),
+		)
+	}
+
+	return result, nil
+}
+
+func (db *DB) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+	if db.conn == nil {
+		return nil, ErrNotConnected
+	}
+
+	rows, err := db.conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		db.logger.Error("Falha na execução da query",
+			"timeout", db.config.Database.Connect.QueryTimeout.String(),
+			"error", err.Error(),
+		)
+		return nil, fault.Wrap(ErrQueryFailed, "query failed",
+			fault.WithWrappedErr(err),
+			fault.WithContext("timeout", db.config.Database.Connect.QueryTimeout.String()),
+		)
+	}
+
+	return rows, nil
+}
+
+func (db *DB) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {
+	if db.conn == nil {
+		return nil
+	}
+
+	return db.conn.QueryRowContext(ctx, query, args...)
+}
+
+func (db *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	if db.conn == nil {
+		return nil, ErrNotConnected
+	}
+
+	tx, err := db.conn.BeginTx(ctx, opts)
+	if err != nil {
+		db.logger.Error("Falha ao iniciar transação", "error", err.Error())
+		return nil, fault.Wrap(ErrTransactionFailed, "begin transaction failed",
+			fault.WithWrappedErr(err),
+		)
+	}
+
+	return tx, nil
+}
+
+func (db *DB) StartHealthCheckRoutine(ctx context.Context) {
+	if db.conn == nil {
+		db.logger.Error("Não é possível iniciar rotina de health check: banco de dados não conectado")
+		return
+	}
+
+	period := db.config.Database.Pool.HealthCheckPeriod
+	ticker := time.NewTicker(period)
+
+	go func() {
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				db.logger.Info("Rotina de health check encerrada")
+				return
+			case <-ticker.C:
+				if err := db.HealthCheck(context.Background()); err != nil {
+					db.logger.Error("Falha no health check", "error", err)
+				} else {
+					stats := db.Stats()
+					db.logger.Debug("Health check do banco de dados aprovado",
+						"open_connections", stats.OpenConnections,
+						"in_use", stats.InUse,
+						"idle", stats.Idle,
+					)
+				}
+			}
+		}
+	}()
+
+	db.logger.Info("Rotina de health check iniciada", "period", period)
+}

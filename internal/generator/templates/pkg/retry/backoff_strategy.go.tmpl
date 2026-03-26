@@ -1,0 +1,18 @@
+package retry
+
+import (
+	"math"
+	"math/rand"
+	"time"
+)
+
+func calculateBackoff(cfg *Config, attempt int) time.Duration {
+	backoff := float64(cfg.MinBackoff) * math.Pow(cfg.Factor, float64(attempt))
+	if backoff > float64(cfg.MaxBackoff) {
+		backoff = float64(cfg.MaxBackoff)
+	}
+	if cfg.Jitter {
+		backoff = backoff * (0.5 + rand.Float64()*0.5) //nolint:gosec
+	}
+	return time.Duration(backoff)
+}

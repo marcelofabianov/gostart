@@ -1,0 +1,169 @@
+package crypto
+
+import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
+	"fmt"
+	"strings"
+
+	"github.com/marcelofabianov/fault"
+	"golang.org/x/crypto/argon2"
+)
+
+const (
+	argon2Algorithm              = "argon2id"
+	argon2HashParts              = 6
+	argon2DefaultMemory   uint32 = 64 * 1024
+	argon2DefaultIter     uint32 = 3
+	argon2DefaultParallel uint8  = 4
+	argon2DefaultSaltLen  uint32 = 16
+	argon2DefaultKeyLen   uint32 = 32
+)
+
+var (
+	ErrHashFailed    = fault.New("falha ao calcular hash da senha", fault.WithCode(fault.Internal))
+	ErrInvalidHash   = fault.New("formato de hash de senha inválido", fault.WithCode(fault.Invalid))
+	ErrEmptyPassword = fault.New("senha não pode ser vazia", fault.WithCode(fault.Invalid))
+)
+
+type PasswordHasher interface {
+	Hash(password string) (string, error)
+	Verify(password, hash string) (bool, error)
+}
+
+type Argon2Params struct {
+	Memory      uint32
+	Iterations  uint32
+	Parallelism uint8
+	SaltLength  uint32
+	KeyLength   uint32
+}
+
+func DefaultArgon2Params() *Argon2Params {
+	return &Argon2Params{
+		Memory:      argon2DefaultMemory,
+		Iterations:  argon2DefaultIter,
+		Parallelism: argon2DefaultParallel,
+		SaltLength:  argon2DefaultSaltLen,
+		KeyLength:   argon2DefaultKeyLen,
+	}
+}
+
+type Argon2Hasher struct {
+	params *Argon2Params
+}
+
+func NewArgon2Hasher() *Argon2Hasher {
+	return &Argon2Hasher{params: DefaultArgon2Params()}
+}
+
+func NewArgon2HasherWithParams(params *Argon2Params) *Argon2Hasher {
+	return &Argon2Hasher{params: params}
+}
+
+func (h *Argon2Hasher) Hash(password string) (string, error) {
+	if password == "" {
+		return "", ErrEmptyPassword
+	}
+
+	salt := make([]byte, h.params.SaltLength)
+	if _, err := rand.Read(salt); err != nil {
+		return "", fault.Wrap(ErrHashFailed, "falha ao gerar salt",
+			fault.WithCode(fault.Internal),
+		)
+	}
+
+	key := argon2.IDKey(
+		[]byte(password),
+		salt,
+		h.params.Iterations,
+		h.params.Memory,
+		h.params.Parallelism,
+		h.params.KeyLength,
+	)
+
+	b64Salt := base64.RawStdEncoding.EncodeToString(salt)
+	b64Key := base64.RawStdEncoding.EncodeToString(key)
+
+	hash := fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
+		argon2.Version,
+		h.params.Memory,
+		h.params.Iterations,
+		h.params.Parallelism,
+		b64Salt,
+		b64Key,
+	)
+
+	return hash, nil
+}
+
+func (h *Argon2Hasher) Verify(password, hash string) (bool, error) {
+	params, salt, key, err := decodeHash(hash)
+	if err != nil {
+		return false, err
+	}
+
+	otherKey := argon2.IDKey(
+		[]byte(password),
+		salt,
+		params.Iterations,
+		params.Memory,
+		params.Parallelism,
+		params.KeyLength,
+	)
+
+	return subtle.ConstantTimeCompare(key, otherKey) == 1, nil
+}
+
+func decodeHash(hash string) (*Argon2Params, []byte, []byte, error) {
+	parts := strings.Split(hash, "$")
+	if len(parts) != argon2HashParts {
+		return nil, nil, nil, fault.Wrap(ErrInvalidHash, "hash deve ter 6 partes",
+			fault.WithContext("parts", len(parts)),
+		)
+	}
+
+	if parts[1] != argon2Algorithm {
+		return nil, nil, nil, fault.Wrap(ErrInvalidHash, "algoritmo não suportado",
+			fault.WithContext("algorithm", parts[1]),
+		)
+	}
+
+	var version int
+	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil {
+		return nil, nil, nil, fault.Wrap(ErrInvalidHash, "falha ao interpretar versão do hash")
+	}
+	if version != argon2.Version {
+		return nil, nil, nil, fault.Wrap(ErrInvalidHash, "versão do hash incompatível",
+			fault.WithContext("version", version),
+		)
+	}
+
+	var memory uint32
+	var iterations uint32
+	var parallelism uint8
+	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &parallelism); err != nil {
+		return nil, nil, nil, fault.Wrap(ErrInvalidHash, "falha ao interpretar parâmetros do hash")
+	}
+
+	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
+	if err != nil {
+		return nil, nil, nil, fault.Wrap(ErrInvalidHash, "falha ao decodificar salt")
+	}
+
+	key, err := base64.RawStdEncoding.DecodeString(parts[5])
+	if err != nil {
+		return nil, nil, nil, fault.Wrap(ErrInvalidHash, "falha ao decodificar chave")
+	}
+
+	return &Argon2Params{
+		Memory:      memory,
+		Iterations:  iterations,
+		Parallelism: parallelism,
+		SaltLength:  uint32(len(salt)), //nolint:gosec
+		KeyLength:   uint32(len(key)),  //nolint:gosec
+	}, salt, key, nil
+}
+
+var _ PasswordHasher = (*Argon2Hasher)(nil)

@@ -1,0 +1,101 @@
+package di
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"go.uber.org/fx"
+
+	"[[.ModuleName]]/config"
+	"[[.ModuleName]]/pkg/cache"
+	"[[.ModuleName]]/pkg/crypto"
+	"[[.ModuleName]]/pkg/database"
+	"[[.ModuleName]]/pkg/logger"
+	"[[.ModuleName]]/pkg/validation"
+)
+
+const infraConnectTimeout = 30 * time.Second
+
+func ProvideConfig() (*config.Config, error) {
+	return config.Load()
+}
+
+func ProvideLogger(cfg *config.Config) *logger.Logger {
+	return logger.New(&logger.Config{
+		Level:       logger.LogLevel(cfg.Logger.Level),
+		Format:      logger.FormatJSON,
+		ServiceName: cfg.General.ServiceName,
+		Environment: cfg.General.Env,
+	})
+}
+
+func ProvideSlogLogger(log *logger.Logger) *slog.Logger {
+	return log.Slog()
+}
+
+func ProvideDatabase(cfg *config.Config, log *logger.Logger, lc fx.Lifecycle) (*database.DB, error) {
+	db, err := database.New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	db.SetLogger(log)
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			connectCtx, cancel := context.WithTimeout(ctx, infraConnectTimeout)
+			defer cancel()
+			log.Info("conectando ao banco de dados")
+			if err := db.Connect(connectCtx); err != nil {
+				return err
+			}
+			log.Info("banco de dados conectado")
+			return nil
+		},
+		OnStop: func(ctx context.Context) error {
+			log.Info("encerrando conexão com banco de dados")
+			return db.Close()
+		},
+	})
+	return db, nil
+}
+
+func ProvideCache(cfg *config.Config, log *logger.Logger, lc fx.Lifecycle) (*cache.Cache, error) {
+	c, err := cache.New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	c.SetLogger(log)
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			connectCtx, cancel := context.WithTimeout(ctx, infraConnectTimeout)
+			defer cancel()
+			log.Info("conectando ao cache")
+			if err := c.Connect(connectCtx); err != nil {
+				return err
+			}
+			log.Info("cache conectado")
+			return nil
+		},
+		OnStop: func(ctx context.Context) error {
+			log.Info("encerrando conexão com cache")
+			return c.Close()
+		},
+	})
+	return c, nil
+}
+
+func ProvideValidation(log *logger.Logger) validation.Validator {
+	return validation.New(log, nil)
+}
+
+var PkgModule = fx.Module("pkg",
+	fx.Provide(
+		ProvideConfig,
+		ProvideLogger,
+		ProvideSlogLogger,
+		ProvideDatabase,
+		ProvideCache,
+		ProvideValidation,
+		crypto.NewArgon2Hasher,
+	),
+)

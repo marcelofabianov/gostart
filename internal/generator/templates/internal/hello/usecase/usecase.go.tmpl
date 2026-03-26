@@ -1,0 +1,17 @@
+package usecase
+
+import (
+	"context"
+
+	"[[.ModuleName]]/internal/hello/domain"
+)
+
+type SayHelloUseCase struct{}
+
+func NewSayHelloUseCase() *SayHelloUseCase {
+	return &SayHelloUseCase{}
+}
+
+func (uc *SayHelloUseCase) Execute(ctx context.Context) (domain.Hello, error) {
+	return domain.NewHello("Hello, World!"), nil
+}

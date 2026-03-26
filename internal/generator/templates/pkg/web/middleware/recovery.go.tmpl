@@ -1,0 +1,35 @@
+package middleware
+
+import (
+	"fmt"
+	"net/http"
+	"runtime/debug"
+
+	"github.com/marcelofabianov/fault"
+
+	"[[.ModuleName]]/pkg/logger"
+	"[[.ModuleName]]/pkg/web"
+)
+
+func Recovery(log *logger.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rvr := recover(); rvr != nil {
+					stack := debug.Stack()
+
+					log.Error("panic recuperado",
+						"panic", fmt.Sprintf("%v", rvr),
+						"path", r.URL.Path,
+						"method", r.Method,
+						"stack", string(stack),
+					)
+
+					web.InternalServerError(w, r, fault.New("erro interno do servidor", fault.WithCode(fault.Internal)))
+				}
+			}()
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}

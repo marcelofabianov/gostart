@@ -1,0 +1,14 @@
+package validation
+
+type Config struct {
+	EnableLogging             bool
+	SanitizeSensitiveData     bool
+	AdditionalSensitiveFields []string
+}
+
+func DefaultConfig() *Config {
+	return &Config{
+		EnableLogging:         true,
+		SanitizeSensitiveData: true,
+	}
+}

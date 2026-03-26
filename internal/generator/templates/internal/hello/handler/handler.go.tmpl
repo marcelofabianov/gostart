@@ -1,0 +1,38 @@
+package handler
+
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+
+	"[[.ModuleName]]/internal/hello/port"
+	"[[.ModuleName]]/pkg/web"
+)
+
+type HelloHandler struct {
+	useCase port.SayHelloPort
+}
+
+func NewHelloHandler(uc port.SayHelloPort) *HelloHandler {
+	return &HelloHandler{useCase: uc}
+}
+
+func (h *HelloHandler) RegisterRoutes(r chi.Router) {
+	r.Get("/hello", h.Hello)
+}
+
+// Hello godoc
+// @Summary      Hello World
+// @Description  Retorna uma mensagem de Hello World
+// @Tags         hello
+// @Produce      json
+// @Success      200  {object}  domain.Hello
+// @Router       /hello [get]
+func (h *HelloHandler) Hello(w http.ResponseWriter, r *http.Request) {
+	hello, err := h.useCase.Execute(r.Context())
+	if err != nil {
+		web.InternalServerError(w, r, err)
+		return
+	}
+	web.Success(w, r, http.StatusOK, hello)
+}

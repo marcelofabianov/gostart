@@ -1,0 +1,48 @@
+package retry
+
+import (
+	"context"
+	"log/slog"
+	"time"
+)
+
+type Config struct {
+	MaxRetries int
+	MinBackoff time.Duration
+	MaxBackoff time.Duration
+	Factor     float64
+	Jitter     bool
+	Logger     *slog.Logger
+}
+
+func Do(ctx context.Context, cfg *Config, fn func(ctx context.Context) error) error {
+	if cfg.Factor <= 0 {
+		cfg.Factor = 2.0
+	}
+
+	var lastErr error
+	for i := 0; i <= cfg.MaxRetries; i++ {
+		if err := fn(ctx); err == nil {
+			return nil
+		} else {
+			lastErr = err
+			if i < cfg.MaxRetries {
+				backoff := calculateBackoff(cfg, i)
+				if cfg.Logger != nil {
+					cfg.Logger.Debug("retrying after error",
+						"attempt", i+1,
+						"max_retries", cfg.MaxRetries,
+						"backoff", backoff,
+						"error", err.Error(),
+					)
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(backoff):
+				}
+			}
+		}
+	}
+	return lastErr
+}

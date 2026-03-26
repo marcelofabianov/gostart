@@ -1,0 +1,23 @@
+package domain
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Hello struct {
+	ID        string    `json:"id"`
+	Message   string    `json:"message"`
+	Module    string    `json:"module"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func NewHello(message string) Hello {
+	return Hello{
+		ID:        uuid.NewString(),
+		Message:   message,
+		Module:    "hello",
+		CreatedAt: time.Now(),
+	}
+}

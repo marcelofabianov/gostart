@@ -1,0 +1,17 @@
+package di
+
+import (
+	"go.uber.org/fx"
+
+	"[[.ModuleName]]/internal/hello/handler"
+	"[[.ModuleName]]/internal/hello/port"
+	"[[.ModuleName]]/internal/hello/usecase"
+)
+
+var HelloModule = fx.Module("hello",
+	fx.Provide(
+		usecase.NewSayHelloUseCase,
+		func(uc *usecase.SayHelloUseCase) port.SayHelloPort { return uc },
+		AsRouter(handler.NewHelloHandler),
+	),
+)

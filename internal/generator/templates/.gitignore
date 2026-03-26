@@ -1,0 +1,38 @@
+# Binários
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Testes
+*.test
+*.out
+coverage.html
+coverage*.out
+
+# Certificados (gerados localmente)
+certs/
+
+# Configuração local
+.env
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker
+.docker/
+
+# Swagger docs (gerados)
+docs/
+
+# OS
+.DS_Store
+Thumbs.db

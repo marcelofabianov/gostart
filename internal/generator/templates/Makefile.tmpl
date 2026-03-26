@@ -1,0 +1,74 @@
+.PHONY: help run build certs migrate-up migrate-down migrate-status test test-unit test-integration test-coverage lint lint-fix fmt security quality docs shell logs
+
+DOCKER_COMPOSE := docker compose
+BINARY_NAME    := api
+BUILD_DIR      := bin
+
+COLOR_RESET := \033[0m
+COLOR_GREEN := \033[32m
+COLOR_BLUE  := \033[34m
+COLOR_BOLD  := \033[1m
+
+help: ## Mostra os comandos disponíveis
+@printf "$(COLOR_BOLD)[[.ServiceName]] — Comandos Disponíveis$(COLOR_RESET)\n\n"
+@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+awk 'BEGIN {FS = ":.*?## "}; {printf "  $(COLOR_GREEN)%-20s$(COLOR_RESET) %s\n", $$1, $$2}'
+
+run: ## Sobe a aplicação com docker-compose
+@$(DOCKER_COMPOSE) up --build
+
+build: ## Compila o binário
+@printf "$(COLOR_BLUE)→ Compilando...$(COLOR_RESET)\n"
+@mkdir -p $(BUILD_DIR)
+@go build -ldflags="-w -s" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/api/main.go
+@printf "$(COLOR_GREEN)✓ Binário: $(BUILD_DIR)/$(BINARY_NAME)$(COLOR_RESET)\n"
+
+certs: ## Gera certificados TLS self-signed para desenvolvimento
+@bash scripts/gen-certs.sh
+
+migrate-up: ## Aplica migrations (goose up)
+@$(DOCKER_COMPOSE) exec api goose -dir db/migrations postgres "$$(grep APP_DB_DSN .env | cut -d= -f2)" up
+
+migrate-down: ## Reverte última migration (goose down)
+@$(DOCKER_COMPOSE) exec api goose -dir db/migrations postgres "$$(grep APP_DB_DSN .env | cut -d= -f2)" down
+
+migrate-status: ## Status das migrations
+@$(DOCKER_COMPOSE) exec api goose -dir db/migrations postgres "$$(grep APP_DB_DSN .env | cut -d= -f2)" status
+
+test: test-unit ## Executa todos os testes
+
+test-unit: ## Testes unitários com race detector
+@$(DOCKER_COMPOSE) exec -e CGO_ENABLED=1 api go test -count=1 -race ./...
+
+test-integration: ## Testes de integração (Testcontainers)
+@CGO_ENABLED=0 go test -tags integration -count=1 -v ./...
+
+test-coverage: ## Relatório de cobertura HTML
+@$(DOCKER_COMPOSE) exec -e CGO_ENABLED=1 api go test ./... -coverprofile=coverage.out -covermode=atomic
+@$(DOCKER_COMPOSE) exec api go tool cover -html=coverage.out -o coverage.html
+@printf "$(COLOR_GREEN)✓ Relatório: coverage.html$(COLOR_RESET)\n"
+
+lint: ## Executa golangci-lint
+@$(DOCKER_COMPOSE) exec api golangci-lint run ./...
+
+lint-fix: ## golangci-lint com correção automática
+@$(DOCKER_COMPOSE) exec api golangci-lint run --fix ./...
+
+fmt: ## Formata o código com gofumpt
+@$(DOCKER_COMPOSE) exec api gofumpt -w .
+
+security: ## Análise de segurança com gosec
+@$(DOCKER_COMPOSE) exec api gosec ./...
+
+quality: lint security test ## lint + security + testes
+
+docs: ## Gera documentação Swagger
+@printf "$(COLOR_BLUE)→ Gerando docs Swagger...$(COLOR_RESET)\n"
+@~/go/bin/swag init -g cmd/api/main.go -o docs --parseDependency --parseInternal
+@printf "$(COLOR_GREEN)✓ Docs gerados em docs/$(COLOR_RESET)\n"
+
+shell: ## Abre shell no container api
+@$(DOCKER_COMPOSE) exec api sh
+
+logs: ## Logs do container api (follow)
+@$(DOCKER_COMPOSE) logs -f api

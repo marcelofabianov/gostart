@@ -1,0 +1,98 @@
+package middleware
+
+import (
+	"compress/gzip"
+	"io"
+	"net/http"
+	"strings"
+	"sync"
+
+	"[[.ModuleName]]/pkg/web"
+)
+
+var gzipWriterPool = sync.Pool{
+	New: func() interface{} {
+		return gzip.NewWriter(io.Discard)
+	},
+}
+
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	Writer        io.Writer
+	wroteHeader   bool
+	statusCode    int
+	headerWritten bool
+	contentType   string
+}
+
+func (w *gzipResponseWriter) WriteHeader(statusCode int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	w.statusCode = statusCode
+
+	if !w.headerWritten {
+		if ct := w.ResponseWriter.Header().Get("Content-Type"); ct != "" {
+			w.contentType = ct
+		}
+
+		w.ResponseWriter.Header().Set("Content-Encoding", "gzip")
+		w.ResponseWriter.Header().Set("Vary", "Accept-Encoding")
+		w.ResponseWriter.Header().Del("Content-Length")
+
+		if w.contentType != "" {
+			w.ResponseWriter.Header().Set("Content-Type", w.contentType)
+		}
+
+		w.headerWritten = true
+	}
+
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		if ct := w.ResponseWriter.Header().Get("Content-Type"); ct != "" {
+			w.contentType = ct
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.Writer.Write(b)
+}
+
+func Compression(level int) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			gz := gzipWriterPool.Get().(*gzip.Writer)
+			defer gzipWriterPool.Put(gz)
+
+			gz.Reset(w)
+			defer func() {
+				if err := gz.Close(); err != nil {
+					log := web.GetLogger(r.Context())
+					log.Error("falha ao fechar escritor gzip", "error", err)
+				}
+			}()
+
+			if level >= gzip.DefaultCompression && level <= gzip.BestCompression {
+				_ = gz.Close()
+				if newGZ, err := gzip.NewWriterLevel(w, level); err == nil {
+					gz = newGZ
+				}
+			}
+
+			gzw := &gzipResponseWriter{
+				ResponseWriter: w,
+				Writer:         gz,
+			}
+
+			next.ServeHTTP(gzw, r)
+		})
+	}
+}

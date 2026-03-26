@@ -1,0 +1,23 @@
+package middleware
+
+import (
+	"net/http"
+
+	"github.com/google/uuid"
+)
+
+func RequestID() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestID := r.Header.Get(headerRequestID)
+			if requestID == "" {
+				requestID = uuid.NewString()
+			}
+
+			w.Header().Set(headerRequestID, requestID)
+			r.Header.Set(headerRequestID, requestID)
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}

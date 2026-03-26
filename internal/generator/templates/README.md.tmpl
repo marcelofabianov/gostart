@@ -1,0 +1,58 @@
+# [[.ServiceName]] API
+
+API REST em Go com arquitetura modular, Security-First e API-First.
+
+## Stack
+
+- **Go 1.25+** com `go.uber.org/fx` (DI)
+- **Chi v5** + middlewares de segurança
+- **PostgreSQL** via `pgx/v5`
+- **Redis** via `go-redis/v9`
+- **JWT** (golang-jwt/jwt v5) + **Argon2id** (crypto)
+- **Swagger** via swaggo
+
+## Quick Start
+
+```bash
+cp .env.example .env
+make certs   # gera certificados TLS para dev
+make run     # sobe com docker-compose
+```
+
+## Rotas
+
+| Método | Rota              | Descrição          |
+|--------|-------------------|--------------------|
+| GET    | /ping             | Heartbeat          |
+| GET    | /health           | Liveness check     |
+| GET    | /health/ready     | Readiness check    |
+| GET    | /api/v1/hello     | Hello World        |
+| GET    | /swagger/*        | Documentação       |
+
+## Comandos
+
+```bash
+make help          # lista todos os comandos
+make build         # compila o binário
+make test          # executa os testes
+make lint          # golangci-lint
+make security      # gosec
+make quality       # lint + security + test
+make docs          # gera Swagger docs
+make migrate-up    # aplica migrations
+```
+
+## Estrutura
+
+```
+internal/
+  hello/           # módulo de exemplo (bounded context)
+    domain/        # entidades
+    handler/       # HTTP handlers (implementam web.Router)
+    port/          # interfaces
+    usecase/       # regras de negócio
+    storage/       # repositórios
+    publisher/     # publicação de eventos
+```
+
+Para adicionar um novo módulo, veja `internal/hello/` como referência.

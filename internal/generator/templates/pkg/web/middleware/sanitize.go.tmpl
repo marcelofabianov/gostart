@@ -1,0 +1,75 @@
+package middleware
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+
+	"github.com/microcosm-cc/bluemonday"
+)
+
+func SanitizeMiddleware(next http.Handler) http.Handler {
+	policy := bluemonday.StrictPolicy()
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !shouldSanitize(r.Method) || r.Body == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "falha ao ler corpo da requisição", http.StatusBadRequest)
+			return
+		}
+		_ = r.Body.Close()
+
+		sanitized := sanitizeJSON(policy, body)
+
+		r.Body = io.NopCloser(bytes.NewReader(sanitized))
+		r.ContentLength = int64(len(sanitized))
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func sanitizeJSON(policy *bluemonday.Policy, data []byte) []byte {
+	var v interface{}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return data
+	}
+
+	sanitized := walkJSON(policy, v)
+
+	out, err := json.Marshal(sanitized)
+	if err != nil {
+		return data
+	}
+	return out
+}
+
+func walkJSON(policy *bluemonday.Policy, v interface{}) interface{} {
+	switch val := v.(type) {
+	case string:
+		return policy.Sanitize(val)
+	case map[string]interface{}:
+		for k, item := range val {
+			val[k] = walkJSON(policy, item)
+		}
+		return val
+	case []interface{}:
+		for i, item := range val {
+			val[i] = walkJSON(policy, item)
+		}
+		return val
+	default:
+		return v
+	}
+}
+
+func shouldSanitize(method string) bool {
+	return method == http.MethodPost ||
+		method == http.MethodPut ||
+		method == http.MethodPatch
+}
