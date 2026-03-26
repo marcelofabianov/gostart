@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -82,6 +83,16 @@ var initCmd = &cobra.Command{
 		}
 
 		fmt.Printf("✅ Projeto %q criado com sucesso em %s\n", projectName, outputDir)
+
+		fmt.Printf("\n📦 Executando go mod tidy...\n")
+		tidy := exec.Command("go", "mod", "tidy")
+		tidy.Dir = outputDir
+		tidy.Stdout = os.Stdout
+		tidy.Stderr = os.Stderr
+		if err := tidy.Run(); err != nil {
+			fmt.Printf("⚠️  go mod tidy falhou (execute manualmente): %v\n", err)
+		}
+
 		fmt.Println("\nPróximos passos:")
 		fmt.Printf("  cd %s\n", projectName)
 		fmt.Println("  cp .env.example .env")
