@@ -1,0 +1,22 @@
+package port
+
+import (
+	"context"
+	"time"
+)
+
+type CreateHelloInput struct {
+	Message    string `validate:"required,min=1,max=255"`
+	ActorEmail string `json:"-"`
+}
+
+type CreateHelloOutput struct {
+	ID        string    `json:"id"`
+	Message   string    `json:"message"`
+	Version   int       `json:"version"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type CreateHelloUseCase interface {
+	Execute(ctx context.Context, input CreateHelloInput) (CreateHelloOutput, error)
+}

@@ -4,14 +4,34 @@ import (
 	"context"
 
 	"[[.ModuleName]]/internal/hello/domain"
+	"[[.ModuleName]]/internal/hello/port"
 )
 
-type SayHelloUseCase struct{}
-
-func NewSayHelloUseCase() *SayHelloUseCase {
-	return &SayHelloUseCase{}
+type createHelloUseCase struct {
+	repo port.HelloRepositoryPort
 }
 
-func (uc *SayHelloUseCase) Execute(ctx context.Context) (domain.Hello, error) {
-	return domain.NewHello("Hello, World!"), nil
+func NewCreateHelloUseCase(repo port.HelloRepositoryPort) port.CreateHelloUseCase {
+	return &createHelloUseCase{repo: repo}
+}
+
+func (uc *createHelloUseCase) Execute(ctx context.Context, input port.CreateHelloInput) (port.CreateHelloOutput, error) {
+	hello, err := domain.NewHello(&domain.NewHelloInput{
+		Message:    input.Message,
+		ActorEmail: input.ActorEmail,
+	})
+	if err != nil {
+		return port.CreateHelloOutput{}, err
+	}
+
+	if err := uc.repo.Save(ctx, hello); err != nil {
+		return port.CreateHelloOutput{}, err
+	}
+
+	return port.CreateHelloOutput{
+		ID:        hello.ID.String(),
+		Message:   hello.Message.String(),
+		Version:   hello.Audit.Version.Int(),
+		CreatedAt: hello.Audit.CreatedAt.Time(),
+	}, nil
 }

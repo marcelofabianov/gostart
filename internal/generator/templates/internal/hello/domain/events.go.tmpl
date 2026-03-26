@@ -1,0 +1,31 @@
+package domain
+
+import (
+	"time"
+
+	"github.com/marcelofabianov/wisp"
+)
+
+const HelloCreatedSubject = "hello.created"
+
+// HelloCreated is a domain event emitted when a Hello is created.
+// Carries only minimal, non-sensitive data needed by consumers.
+type HelloCreated struct {
+	helloID    wisp.UUID
+	message    string
+	occurredAt time.Time
+}
+
+func NewHelloCreated(h *Hello) HelloCreated {
+	return HelloCreated{
+		helloID:    h.ID,
+		message:    h.Message.String(),
+		occurredAt: time.Now(),
+	}
+}
+
+func (e HelloCreated) Subject() string       { return HelloCreatedSubject }
+func (e HelloCreated) AggregateID() string   { return e.helloID.String() }
+func (e HelloCreated) OccurredAt() time.Time { return e.occurredAt }
+func (e HelloCreated) HelloID() string       { return e.helloID.String() }
+func (e HelloCreated) Message() string       { return e.message }

@@ -1,23 +1,44 @@
 package domain
 
 import (
-	"time"
-
-	"github.com/google/uuid"
+	"github.com/marcelofabianov/wisp"
 )
 
-type Hello struct {
-	ID        string    `json:"id"`
-	Message   string    `json:"message"`
-	Module    string    `json:"module"`
-	CreatedAt time.Time `json:"created_at"`
+type NewHelloInput struct {
+	Message    string
+	ActorEmail string
 }
 
-func NewHello(message string) Hello {
-	return Hello{
-		ID:        uuid.NewString(),
-		Message:   message,
-		Module:    "hello",
-		CreatedAt: time.Now(),
+type Hello struct {
+	ID      wisp.UUID           `db:"id"`
+	Message wisp.NonEmptyString `db:"message"`
+	events  []interface{}
+	wisp.Audit
+}
+
+func NewHello(input *NewHelloInput) (*Hello, error) {
+	id, err := wisp.NewUUID()
+	if err != nil {
+		return nil, NewErrHelloFailedGenerateUuid(err)
 	}
+
+	message, err := wisp.NewNonEmptyString(input.Message)
+	if err != nil {
+		return nil, NewErrHelloInvalidMessage()
+	}
+
+	h := &Hello{
+		ID:      id,
+		Message: message,
+		events:  []interface{}{},
+		Audit:   wisp.NewAudit(wisp.AuditUser(input.ActorEmail)),
+	}
+
+	h.events = append(h.events, NewHelloCreated(h))
+
+	return h, nil
+}
+
+func (h *Hello) Events() []interface{} {
+	return h.events
 }

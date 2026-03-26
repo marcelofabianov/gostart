@@ -4,14 +4,14 @@ import (
 	"go.uber.org/fx"
 
 	"[[.ModuleName]]/internal/hello/handler"
-	"[[.ModuleName]]/internal/hello/port"
+	"[[.ModuleName]]/internal/hello/storage"
 	"[[.ModuleName]]/internal/hello/usecase"
 )
 
 var HelloModule = fx.Module("hello",
 	fx.Provide(
-		usecase.NewSayHelloUseCase,
-		func(uc *usecase.SayHelloUseCase) port.SayHelloPort { return uc },
+		storage.NewMemoryHelloRepository,
+		usecase.NewCreateHelloUseCase,
 		AsRouter(handler.NewHelloHandler),
 	),
 )

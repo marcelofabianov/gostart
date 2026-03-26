@@ -1,0 +1,11 @@
+package port
+
+import (
+	"context"
+
+	"[[.ModuleName]]/internal/hello/domain"
+)
+
+type HelloRepositoryPort interface {
+	Save(ctx context.Context, hello *domain.Hello) error
+}

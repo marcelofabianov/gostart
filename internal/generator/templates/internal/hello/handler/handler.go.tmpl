@@ -1,38 +1,71 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/marcelofabianov/fault"
 
 	"[[.ModuleName]]/internal/hello/port"
+	"[[.ModuleName]]/pkg/validation"
 	"[[.ModuleName]]/pkg/web"
 )
 
-type HelloHandler struct {
-	useCase port.SayHelloPort
+type CreateHelloRequest struct {
+	Message string `json:"message" validate:"required,min=1,max=255"`
 }
 
-func NewHelloHandler(uc port.SayHelloPort) *HelloHandler {
-	return &HelloHandler{useCase: uc}
+type HelloHandler struct {
+	useCase   port.CreateHelloUseCase
+	validator validation.Validator
+}
+
+func NewHelloHandler(uc port.CreateHelloUseCase, v validation.Validator) *HelloHandler {
+	return &HelloHandler{useCase: uc, validator: v}
 }
 
 func (h *HelloHandler) RegisterRoutes(r chi.Router) {
-	r.Get("/hello", h.Hello)
+	r.Post("/hello", h.Create)
 }
 
-// Hello godoc
-// @Summary      Hello World
-// @Description  Retorna uma mensagem de Hello World
+// Create godoc
+// @Summary      Criar hello
+// @Description  Cria uma nova mensagem hello world.
 // @Tags         hello
+// @Accept       json
 // @Produce      json
-// @Success      200  {object}  domain.Hello
-// @Router       /hello [get]
-func (h *HelloHandler) Hello(w http.ResponseWriter, r *http.Request) {
-	hello, err := h.useCase.Execute(r.Context())
-	if err != nil {
-		web.InternalServerError(w, r, err)
+// @Param        body  body      CreateHelloRequest   true  "Dados da mensagem"
+// @Success      201   {object}  port.CreateHelloOutput
+// @Failure      400   {object}  web.ErrorResponse
+// @Failure      422   {object}  web.ErrorResponse
+// @Failure      500   {object}  web.ErrorResponse
+// @Router       /hello [post]
+func (h *HelloHandler) Create(w http.ResponseWriter, r *http.Request) {
+	var req CreateHelloRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		web.Error(w, r, fault.New("corpo da requisição inválido", fault.WithCode(fault.Invalid)))
 		return
 	}
-	web.Success(w, r, http.StatusOK, hello)
+
+	if err := h.validator.Struct(r.Context(), req); err != nil {
+		web.Error(w, r, err)
+		return
+	}
+
+	actorEmail, ok := web.GetUserEmail(r.Context())
+	if !ok {
+		actorEmail = "system"
+	}
+
+	out, err := h.useCase.Execute(r.Context(), port.CreateHelloInput{
+		Message:    req.Message,
+		ActorEmail: actorEmail,
+	})
+	if err != nil {
+		web.Error(w, r, err)
+		return
+	}
+
+	web.Created(w, r, out)
 }

@@ -1,0 +1,30 @@
+package storage
+
+import (
+	"context"
+	"sync"
+
+	"[[.ModuleName]]/internal/hello/domain"
+	"[[.ModuleName]]/internal/hello/port"
+)
+
+// memoryHelloRepository is an in-memory implementation of HelloRepositoryPort.
+// Replace with a real database implementation (e.g., postgres_hello_repository.go)
+// when persistence is needed.
+type memoryHelloRepository struct {
+	mu    sync.RWMutex
+	items map[string]*domain.Hello
+}
+
+func NewMemoryHelloRepository() port.HelloRepositoryPort {
+	return &memoryHelloRepository{
+		items: make(map[string]*domain.Hello),
+	}
+}
+
+func (r *memoryHelloRepository) Save(ctx context.Context, hello *domain.Hello) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.items[hello.ID.String()] = hello
+	return nil
+}

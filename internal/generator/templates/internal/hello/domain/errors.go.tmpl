@@ -1,0 +1,48 @@
+package domain
+
+import (
+	"errors"
+
+	"github.com/marcelofabianov/fault"
+)
+
+const HELLO_AGGREGATE = "hello"
+
+// Sentinel errors — EN-US identifiers for errors.Is() checking.
+var (
+	ErrHelloInvalidMessage     = errors.New("invalid hello message")
+	ErrHelloNotFound           = errors.New("hello not found")
+	ErrHelloFailedGenerateUuid = errors.New("failed to generate hello uuid")
+	ErrHelloFailedCreate       = errors.New("failed to create hello")
+)
+
+// Factory functions — PT-BR user-facing messages wrapped with fault context.
+
+func NewErrHelloInvalidMessage() error {
+	return fault.Wrap(ErrHelloInvalidMessage, "mensagem inválida",
+		fault.WithCode(fault.DomainViolation),
+		fault.WithContext("aggregate", HELLO_AGGREGATE),
+	)
+}
+
+func NewErrHelloNotFound() error {
+	return fault.Wrap(ErrHelloNotFound, "hello não encontrado",
+		fault.WithCode(fault.NotFound),
+		fault.WithContext("aggregate", HELLO_AGGREGATE),
+	)
+}
+
+func NewErrHelloFailedGenerateUuid(err error) error {
+	return fault.Wrap(ErrHelloFailedGenerateUuid, "falha ao gerar identificador",
+		fault.WithCode(fault.Internal),
+		fault.WithWrappedErr(err),
+		fault.WithContext("aggregate", HELLO_AGGREGATE),
+	)
+}
+
+func NewErrHelloFailedCreate() error {
+	return fault.Wrap(ErrHelloFailedCreate, "falha ao criar hello",
+		fault.WithCode(fault.Internal),
+		fault.WithContext("aggregate", HELLO_AGGREGATE),
+	)
+}
